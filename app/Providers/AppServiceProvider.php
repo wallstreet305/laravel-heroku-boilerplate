@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Providers;
+namespace OBS\Providers;
 
 use Illuminate\Support\ServiceProvider;
 

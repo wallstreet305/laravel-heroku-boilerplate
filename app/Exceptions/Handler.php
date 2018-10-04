@@ -1,9 +1,12 @@
 <?php
 
-namespace App\Exceptions;
+namespace OBS\Exceptions;
 
 use Exception;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Session\TokenMismatchException;
+use Tymon\JWTAuth\Exceptions\TokenExpiredException;
 
 class Handler extends ExceptionHandler
 {
@@ -29,6 +32,8 @@ class Handler extends ExceptionHandler
     /**
      * Report or log an exception.
      *
+     * This is a great spot to send exceptions to Sentry, Bugsnag, etc.
+     *
      * @param  \Exception  $exception
      * @return void
      */
@@ -44,8 +49,61 @@ class Handler extends ExceptionHandler
      * @param  \Exception  $exception
      * @return \Illuminate\Http\Response
      */
-    public function render($request, Exception $exception)
+//    public function render($request, Exception $exception)
+//    {
+//        return parent::render($request, $exception);
+//    }
+
+    public function render($request, Exception $e)
     {
-        return parent::render($request, $exception);
+        $code = 400;
+        $response = [
+            'error' => [
+                'type'      => class_basename(get_class($e)),
+                'message'   => $e->getMessage(),
+                'file'      => $e->getFile(),
+                'line'      => $e->getLine()
+            ]
+        ];
+
+        if ($e instanceof ValidationException) {
+            $code = 422;
+            $validator = $e->validator;
+            $failed = $validator->failed();
+
+            $errors = [];
+
+            foreach ($failed as $field_name => $failedone) {
+                if (isset($failed[$field_name])) {
+                    $errors[$field_name] = array_keys($failed[$field_name]);
+                }
+            }
+
+            $first_failure = reset($errors);
+            $rule = array_shift($first_failure);
+            $field = key($errors);
+            $payload = [
+                'type' => 'ValidationException',
+                'field' => $field,
+                'message' => $validator->errors()->first(),
+                'rule' => strtolower($rule),
+            ];
+
+            if (isset($failed[$field]) &&
+                isset($failed[$field][$rule]) &&
+                !in_array($rule, ['Unique', 'Exists'])) {
+                $payload['rule_attributes'] = $failed[$field][$rule];
+            }
+
+            if ($rule == 'RequiredUnless') {
+                $payload['other_field'] = array_shift($payload['rule_attributes']);
+            }
+            $response['error'] = $payload;
+        }
+
+        if ($e instanceof TokenMismatchException || $e instanceof TokenExpiredException) {
+            $code = 401;
+        }
+        return response()->json($response, $code);
     }
 }
